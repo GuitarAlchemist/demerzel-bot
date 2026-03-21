@@ -50,8 +50,13 @@ function detectPersona(message) {
 
   if (content.includes('demerzel') || content.includes('govern') || content.includes('constitution') ||
       content.includes('policy') || content.includes('audit') || content.includes('conscience') ||
-      channelName.includes('demerzel') || channelName.includes('governance')) {
+      channelName.includes('demerzel') || channelName.includes('governance') || channelName.includes('dev-ops')) {
     return 'demerzel';
+  }
+
+  // Research channel → Seldon
+  if (channelName.includes('research')) {
+    return 'seldon';
   }
 
   // Default: if it's a question about music/guitar → Seldon, otherwise → Demerzel
@@ -104,7 +109,8 @@ function shouldRespond(message) {
 
   // Respond in dedicated channels
   const channelName = message.channel.name || '';
-  if (channelName.includes('demerzel') || channelName.includes('seldon') || channelName.includes('academy')) {
+  if (channelName.includes('demerzel') || channelName.includes('seldon') || channelName.includes('academy') ||
+      channelName.includes('governance') || channelName.includes('research') || channelName.includes('dev-ops')) {
     return true;
   }
 
