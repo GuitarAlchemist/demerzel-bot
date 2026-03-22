@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, Partials, EmbedBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, Partials, EmbedBuilder, ChannelType } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
 
@@ -17,7 +17,7 @@ if (fs.existsSync(LOCK_FILE)) {
 }
 fs.writeFileSync(LOCK_FILE, String(process.pid));
 const Anthropic = require('@anthropic-ai/sdk').default;
-const { buildDemerzelSystemPrompt, buildSeldonSystemPrompt, buildGASystemPrompt, buildBSPrompt, getMusicTools } = require('./context');
+const { buildDemerzelSystemPrompt, buildSeldonSystemPrompt, buildGASystemPrompt, buildBSPrompt, getMusicTools, getGovernanceTools } = require('./context');
 const { renderFretboard, renderChordProgression, tryRenderFromText } = require('./vexRenderer');
 
 const client = new Client({
@@ -37,7 +37,7 @@ const conversationHistory = new Map();
 const MAX_HISTORY = 10;
 
 // Build system prompts once at startup
-let demerzelPrompt, seldonPrompt, gaPrompt, bsPrompt, musicTools;
+let demerzelPrompt, seldonPrompt, gaPrompt, bsPrompt, musicTools, governanceTools;
 
 function getHistory(channelId) {
   if (!conversationHistory.has(channelId)) {
@@ -76,8 +76,8 @@ function detectPersona(message) {
     return 'seldon';
   }
 
-  // BS detector channel or keywords
-  if (channelName.includes('bs-detector') || channelName.includes('bs') ||
+  // BS detector / clarity channels
+  if (channelName.includes('bs-detector') || channelName.includes('clarity') || channelName.includes('bs') ||
       content.includes('translate this bs') || content.includes('detect bs') ||
       content.includes('generate bs') || content.includes('corporate speak') ||
       content.includes('buzzword')) {
@@ -111,7 +111,7 @@ async function generateResponse(persona, channelId, userMessage) {
   else systemPrompt = demerzelPrompt;
 
   const history = getHistory(channelId);
-  const useTools = persona === 'ga';
+  const useTools = persona === 'ga' || persona === 'demerzel';
 
   try {
     const apiParams = {
@@ -124,9 +124,11 @@ async function generateResponse(persona, channelId, userMessage) {
       ],
     };
 
-    // GA persona uses tool_use for structured music analysis
-    if (useTools) {
+    // Register tools based on persona
+    if (persona === 'ga') {
       apiParams.tools = musicTools;
+    } else if (persona === 'demerzel') {
+      apiParams.tools = governanceTools;
     }
 
     let response = await anthropic.messages.create(apiParams);
@@ -173,6 +175,37 @@ async function generateResponse(persona, channelId, userMessage) {
             console.error('Chord render error:', e.message);
             toolResult = `[Chord notation rendering failed: ${e.message}. Show the chord names and analysis in text instead.]`;
           }
+        } else if (block.name === 'create_channel') {
+          try {
+            const guild = client.guilds.cache.first();
+            const existing = guild.channels.cache.find(
+              (c) => c.name === block.input.name && c.type === ChannelType.GuildText
+            );
+            if (existing) {
+              toolResult = `Channel #${existing.name} already exists (${existing.id}). No action needed.`;
+            } else {
+              const newCh = await guild.channels.create({
+                name: block.input.name,
+                type: ChannelType.GuildText,
+                topic: block.input.topic || '',
+                reason: `Created by Demerzel governance tool`,
+              });
+              toolResult = `Channel #${newCh.name} created successfully (${newCh.id}). It is now available in the server.`;
+            }
+          } catch (e) {
+            toolResult = `Channel creation failed: ${e.message}. The bot may need Manage Channels permission in Discord server settings.`;
+          }
+        } else if (block.name === 'list_channels') {
+          try {
+            const guild = client.guilds.cache.first();
+            const channels = guild.channels.cache
+              .filter((c) => c.type === ChannelType.GuildText)
+              .map((c) => `#${c.name}: ${c.topic || '(no topic)'}`)
+              .join('\n');
+            toolResult = channels || 'No text channels found.';
+          } catch (e) {
+            toolResult = `Failed to list channels: ${e.message}`;
+          }
         } else {
           toolResult = `[Tool ${block.name} called with: ${JSON.stringify(block.input)}. Generate a detailed, musician-friendly response using your music theory knowledge.]`;
         }
@@ -211,8 +244,15 @@ async function generateResponse(persona, channelId, userMessage) {
 }
 
 function shouldRespond(message) {
-  // Ignore bots
-  if (message.author.bot) return false;
+  // Ignore other bots, but allow self-messages from Claude Code MCP
+  // (MCP sends as the bot account — we detect these via a marker prefix)
+  if (message.author.bot) {
+    // Allow self-test messages prefixed with [DEMERZEL-TEST]
+    if (message.author.id === client.user?.id && message.content.startsWith('[DEMERZEL-TEST]')) {
+      return true;
+    }
+    return false;
+  }
 
   // Always respond to DMs
   if (!message.guild) return true;
@@ -224,7 +264,8 @@ function shouldRespond(message) {
   const channelName = message.channel.name || '';
   if (channelName.includes('demerzel') || channelName.includes('seldon') || channelName.includes('academy') ||
       channelName.includes('governance') || channelName.includes('research') || channelName.includes('dev-ops') ||
-      channelName.includes('music') || channelName.includes('guitar') || channelName.includes('bs-detector')) {
+      channelName.includes('music') || channelName.includes('guitar') || channelName.includes('bs-detector') ||
+      channelName.includes('clarity')) {
     return true;
   }
 
@@ -244,8 +285,9 @@ client.on('ready', () => {
   gaPrompt = buildGASystemPrompt();
   bsPrompt = buildBSPrompt();
   musicTools = getMusicTools();
+  governanceTools = getGovernanceTools();
   console.log('✓ Demerzel, Seldon, GA, and BS Detector prompts loaded');
-  console.log(`✓ ${musicTools.length} music tools registered`);
+  console.log(`✓ ${musicTools.length} music tools + ${governanceTools.length} governance tools registered`);
 
   client.user.setActivity('🎸 Ask me about guitar', { type: 3 }); // WATCHING
 });

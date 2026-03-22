@@ -380,4 +380,29 @@ When someone says "translate" or "what does this really mean", decode corporate/
 ${bsGrammar.slice(0, 3000)}`;
 }
 
-module.exports = { buildDemerzelSystemPrompt, buildSeldonSystemPrompt, buildGASystemPrompt, buildBSPrompt, getMusicTools };
+function getGovernanceTools() {
+  return [
+    {
+      name: 'create_channel',
+      description: 'Create a new text channel in the Discord guild. Use when asked to create, set up, or add a channel.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'Channel name (lowercase, hyphens, no spaces, e.g., "clarity-lab")' },
+          topic: { type: 'string', description: 'Channel description/topic shown in header' },
+        },
+        required: ['name'],
+      },
+    },
+    {
+      name: 'list_channels',
+      description: 'List all text channels in the guild with their topics.',
+      input_schema: {
+        type: 'object',
+        properties: {},
+      },
+    },
+  ];
+}
+
+module.exports = { buildDemerzelSystemPrompt, buildSeldonSystemPrompt, buildGASystemPrompt, buildBSPrompt, getMusicTools, getGovernanceTools };
