@@ -210,7 +210,7 @@ function shouldRespond(message) {
   const channelName = message.channel.name || '';
   if (channelName.includes('demerzel') || channelName.includes('seldon') || channelName.includes('academy') ||
       channelName.includes('governance') || channelName.includes('research') || channelName.includes('dev-ops') ||
-      channelName.includes('music') || channelName.includes('guitar')) {
+      channelName.includes('music') || channelName.includes('guitar') || channelName.includes('bs-detector')) {
     return true;
   }
 
@@ -237,7 +237,9 @@ client.on('ready', () => {
 });
 
 client.on('messageCreate', async (message) => {
-  if (!shouldRespond(message)) return;
+  const willRespond = shouldRespond(message);
+  console.log(`📨 ${message.channel.name || 'DM'} | ${message.author.tag} | bot=${message.author.bot} | respond=${willRespond} | "${message.content.slice(0, 50)}"`);
+  if (!willRespond) return;
 
   // Clean the message content (remove bot mention)
   let content = message.content
@@ -250,6 +252,22 @@ client.on('messageCreate', async (message) => {
   }
 
   const persona = detectPersona(message);
+
+  // Handle "help" command — show channel tutorial
+  if (content.toLowerCase() === 'help') {
+    const tutorials = {
+      'ga': '🎸 **Guitar Alchemist Help**\n\n• `What chord is Cmaj7?` — chord analysis\n• `Show me A minor pentatonic` — fretboard diagram\n• `Analyze Em - C - G - D` — harmonic analysis\n• `Reharmonize I-V-vi-IV in jazz` — chord substitution\n• `Practice routine, intermediate, 30 min` — practice plan\n• `OPTIC analysis: Cmaj7 to Fmaj7` — voice leading\n• `What scale over Dm7-G7-Cmaj7?` — scale suggestions',
+      'demerzel': '🏛️ **Demerzel Help**\n\n• `What are the Asimov Laws?` — Articles 0-5\n• `Explain ERGOL vs LOLLI` — compounding economics\n• `What is tetravalent logic?` — T/F/U/C\n• `What is D_c?` — compounding dimension\n• `Explain the AI-Age Manifesto` — 10 principles\n• `Explain Article 3 (Reversibility)` — constitutional principles',
+      'seldon': '📚 **Seldon Help**\n\n• `Teach me about modes` — adaptive lesson\n• `What departments exist?` — 21 departments\n• `Explain cybernetics` — VSM, feedback loops\n• `What is ERGOL vs LOLLI?` — compounding economics\n• `How does entropy relate to governance?` — Info Theory',
+      'bs': '🔴 **BS Detector Help**\n\n• Paste any text → get BS score (4 tests)\n• `Generate BS about Q3 results` → inflate clear speech\n• `Translate: We need to rightsize our operational footprint` → decode jargon\n\nTests: Specificity · Falsifiability · Density · Commitment\nScore: 🟢 T (real) · 🟡 U (unclear) · 🔴 C (BS)',
+    };
+    const helpText = tutorials[persona] || tutorials['demerzel'];
+    const embed = new EmbedBuilder()
+      .setDescription(helpText)
+      .setColor(persona === 'bs' ? 0xE06C75 : persona === 'ga' ? 0xF0883E : persona === 'seldon' ? 0x7289DA : 0x4CB050);
+    await message.reply({ embeds: [embed] });
+    return;
+  }
 
   // Show typing indicator
   await message.channel.sendTyping();
