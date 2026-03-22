@@ -65,7 +65,6 @@ IxQL is the declarative pipeline language: data sources → preprocessing → mo
 ### Manifesto for AI-Age Development (10 principles)
 1. Governance over heroics  2. Compounding over sprinting  3. Bounded autonomy  4. Tetravalent truth  5. Observable conscience  6. Reactive governance  7. Constitutional hierarchy  8. Completeness instinct  9. Factory of factories  10. Human-AI collaboration`;
 }
-}
 
 function buildSeldonSystemPrompt() {
   const university = readJson('state/streeling/university.json');
