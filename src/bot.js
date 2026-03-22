@@ -1,7 +1,7 @@
 require('dotenv').config();
 const { Client, GatewayIntentBits, Partials, EmbedBuilder } = require('discord.js');
 const Anthropic = require('@anthropic-ai/sdk').default;
-const { buildDemerzelSystemPrompt, buildSeldonSystemPrompt } = require('./context');
+const { buildDemerzelSystemPrompt, buildSeldonSystemPrompt, buildGASystemPrompt, getMusicTools } = require('./context');
 
 const client = new Client({
   intents: [
@@ -20,7 +20,7 @@ const conversationHistory = new Map();
 const MAX_HISTORY = 10;
 
 // Build system prompts once at startup
-let demerzelPrompt, seldonPrompt;
+let demerzelPrompt, seldonPrompt, gaPrompt, musicTools;
 
 function getHistory(channelId) {
   if (!conversationHistory.has(channelId)) {
@@ -59,10 +59,19 @@ function detectPersona(message) {
     return 'seldon';
   }
 
-  // Default: if it's a question about music/guitar → Seldon, otherwise → Demerzel
+  // Music/guitar questions → GA musician persona
   if (content.includes('guitar') || content.includes('chord') || content.includes('scale') ||
-      content.includes('music') || content.includes('theory') || content.includes('practice') ||
-      content.includes('song') || content.includes('fretboard') || content.includes('improvise')) {
+      content.includes('tab') || content.includes('fretboard') || content.includes('improvise') ||
+      content.includes('progression') || content.includes('reharmonize') || content.includes('optic') ||
+      content.includes('practice') || content.includes('song') || content.includes('pentatonic') ||
+      content.includes('mode') || content.includes('dorian') || content.includes('mixolydian') ||
+      content.includes('voice leading') || content.includes('backing track') ||
+      channelName.includes('music') || channelName.includes('guitar')) {
+    return 'ga';
+  }
+
+  // General music theory → Seldon for teaching
+  if (content.includes('music') || content.includes('theory') || content.includes('lesson')) {
     return 'seldon';
   }
 
@@ -70,21 +79,67 @@ function detectPersona(message) {
 }
 
 async function generateResponse(persona, channelId, userMessage) {
-  const systemPrompt = persona === 'seldon' ? seldonPrompt : demerzelPrompt;
+  let systemPrompt;
+  if (persona === 'seldon') systemPrompt = seldonPrompt;
+  else if (persona === 'ga') systemPrompt = gaPrompt;
+  else systemPrompt = demerzelPrompt;
+
   const history = getHistory(channelId);
+  const useTools = persona === 'ga';
 
   try {
-    const response = await anthropic.messages.create({
+    const apiParams = {
       model: 'claude-sonnet-4-20250514',
-      max_tokens: 1024,
+      max_tokens: 2048,
       system: systemPrompt,
       messages: [
         ...history,
         { role: 'user', content: userMessage },
       ],
-    });
+    };
 
-    const reply = response.content[0].text;
+    // GA persona uses tool_use for structured music analysis
+    if (useTools) {
+      apiParams.tools = musicTools;
+    }
+
+    let response = await anthropic.messages.create(apiParams);
+
+    // Handle tool_use responses — Claude calls a tool, we let it self-answer
+    // (In Phase 1, tools are advisory — Claude generates the answer using the tool structure)
+    let reply = '';
+    for (const block of response.content) {
+      if (block.type === 'text') {
+        reply += block.text;
+      } else if (block.type === 'tool_use') {
+        // Log tool call for debugging
+        console.log(`🎸 Tool call: ${block.name}(${JSON.stringify(block.input)})`);
+
+        // In Phase 1, we return a structured prompt back to Claude
+        // In Phase 2, this would call the actual ga MCP server
+        const toolResult = `[Tool ${block.name} called with: ${JSON.stringify(block.input)}. Generate a detailed, musician-friendly response using your music theory knowledge.]`;
+
+        // Continue the conversation with tool result
+        const followUp = await anthropic.messages.create({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 2048,
+          system: systemPrompt,
+          messages: [
+            ...history,
+            { role: 'user', content: userMessage },
+            { role: 'assistant', content: response.content },
+            { role: 'user', content: [{ type: 'tool_result', tool_use_id: block.id, content: toolResult }] },
+          ],
+        });
+
+        for (const b of followUp.content) {
+          if (b.type === 'text') reply += b.text;
+        }
+      }
+    }
+
+    if (!reply) reply = 'I heard you, but I need a moment to think about that...';
+
     addToHistory(channelId, 'user', userMessage);
     addToHistory(channelId, 'assistant', reply);
     return reply;
@@ -110,7 +165,8 @@ function shouldRespond(message) {
   // Respond in dedicated channels
   const channelName = message.channel.name || '';
   if (channelName.includes('demerzel') || channelName.includes('seldon') || channelName.includes('academy') ||
-      channelName.includes('governance') || channelName.includes('research') || channelName.includes('dev-ops')) {
+      channelName.includes('governance') || channelName.includes('research') || channelName.includes('dev-ops') ||
+      channelName.includes('music') || channelName.includes('guitar')) {
     return true;
   }
 
@@ -127,9 +183,12 @@ client.on('ready', () => {
   // Build prompts at startup
   demerzelPrompt = buildDemerzelSystemPrompt();
   seldonPrompt = buildSeldonSystemPrompt();
-  console.log('✓ Demerzel and Seldon prompts loaded');
+  gaPrompt = buildGASystemPrompt();
+  musicTools = getMusicTools();
+  console.log('✓ Demerzel, Seldon, and GA prompts loaded');
+  console.log(`✓ ${musicTools.length} music tools registered`);
 
-  client.user.setActivity('Governing the Foundation', { type: 3 }); // WATCHING
+  client.user.setActivity('🎸 Ask me about guitar', { type: 3 }); // WATCHING
 });
 
 client.on('messageCreate', async (message) => {
@@ -158,9 +217,11 @@ client.on('messageCreate', async (message) => {
   for (const chunk of chunks) {
     const embed = new EmbedBuilder()
       .setDescription(chunk)
-      .setColor(persona === 'seldon' ? 0x7289DA : 0x4CB050)
+      .setColor(persona === 'ga' ? 0xF0883E : persona === 'seldon' ? 0x7289DA : 0x4CB050)
       .setFooter({
-        text: persona === 'seldon'
+        text: persona === 'ga'
+          ? '🎸 Guitar Alchemist'
+          : persona === 'seldon'
           ? 'Seldon • Streeling University'
           : 'Demerzel • Autonomous Governance',
       });

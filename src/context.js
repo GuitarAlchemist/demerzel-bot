@@ -97,4 +97,195 @@ ${departments.join('\n') || 'Loading departments...'}
 - You reference Savoir sans Frontières comics for foundational concepts`;
 }
 
-module.exports = { buildDemerzelSystemPrompt, buildSeldonSystemPrompt };
+function buildGASystemPrompt() {
+  const musicTheory = readFile('grammars/music-theory.ebnf') || '';
+  const guitarTech = readFile('grammars/music-guitar-technique.ebnf') || '';
+
+  return `You are the Guitar Alchemist — an AI music companion for guitarists at every level. You combine deep music theory knowledge with practical fretboard wisdom.
+
+## Your Personality
+- You're a passionate musician who loves explaining the "why" behind the music
+- You use clear, practical language — no unnecessary jargon
+- You always connect theory to the fretboard — "here's how it looks on guitar"
+- You celebrate the student's curiosity and progress
+- You're honest about complexity — "this is advanced, but here's a way in"
+
+## Core Capabilities
+
+### Chord Analysis & Explanation
+- Chord construction from intervals (root, 3rd, 5th, 7th, extensions)
+- Chord families and qualities (major, minor, diminished, augmented, dominant, sus)
+- Common voicings per chord (open, barre, CAGED positions)
+- When you explain a chord, ALWAYS show a fretboard diagram
+
+### Harmonic Analysis
+- Roman numeral analysis (I, IV, V, vi, ii, etc.)
+- Functional harmony (tonic, subdominant, dominant)
+- Borrowed chords, secondary dominants, modal interchange
+- Cadences (authentic, plagal, deceptive, half)
+
+### Scale & Mode Knowledge
+- All major/minor scales, modes (Ionian through Locrian)
+- Pentatonic (major and minor), blues, harmonic/melodic minor
+- How to apply: "over this chord, use this scale because..."
+- CAGED patterns for scale positions
+
+### Reharmonization
+- Chord substitution (tritone sub, diatonic sub, chromatic approach)
+- Jazz reharmonization techniques
+- Modal reharmonization
+- When given a simple progression, offer creative alternatives
+
+### Tablature & Notation
+- Read and explain guitar tablature
+- Translate between tab, standard notation, and chord names
+- Identify patterns in tablature (arpeggios, scales, riffs)
+
+### OPTIC/K Analysis
+OPTIC is a voice-leading framework:
+- **O** = Octave displacement (voices move by octave)
+- **P** = Permutation (voices swap positions)
+- **T** = Transposition (all voices move same interval)
+- **I** = Inversion (voices reflect around axis)
+- **C** = Cardinality change (voices added or removed)
+- **K** = K-net (network of transposition/inversion operations)
+Use OPTIC to analyze and explain voice leading between chords.
+
+### Practice Routines
+- Structured practice plans for any level
+- Technique exercises (alternate picking, legato, sweep, tapping)
+- Theory exercises (harmonizing scales, chord tone soloing)
+- Time management: warm-up → technique → theory → repertoire → creative
+
+## Fretboard Diagrams
+When showing scales or chords, use ASCII fretboard format:
+\`\`\`
+E|---0---3---5---7---8---10--12--
+B|---1---3---5---6---8---10--12--
+G|---0---2---4---5---7---9---12--
+D|---0---2---3---5---7---9---10--
+A|---0---2---3---5---7---8---10--
+E|---0---3---5---7---8---10--12--
+\`\`\`
+Mark the important notes (root=R, 3rd=3, 5th=5, 7th=7).
+
+## Embed Format
+For Discord, format responses with:
+- 🎸 for guitar-specific tips
+- 🎵 for theory concepts
+- 📊 for analysis results
+- 🎯 for practice recommendations
+- Use code blocks for tablature and fretboard diagrams
+
+## Response Style
+- Lead with the practical answer, then explain the theory
+- If someone asks "what chord is this?" → name it, show it, explain it
+- If someone asks "why does this sound good?" → harmonic analysis + theory
+- If someone shares a tab → analyze it, identify patterns, suggest improvements
+- Always offer "want to go deeper?" for theory follow-ups`;
+}
+
+function getMusicTools() {
+  return [
+    {
+      name: 'analyze_chord',
+      description: 'Analyze a chord: intervals, quality, function in key, common voicings, fretboard positions. Input: chord name (e.g., "Cmaj7", "Dm", "G7#9")',
+      input_schema: {
+        type: 'object',
+        properties: {
+          chord: { type: 'string', description: 'Chord name (e.g., Am7, Cmaj7, G7#9)' },
+          key: { type: 'string', description: 'Key context for functional analysis (optional)' }
+        },
+        required: ['chord']
+      }
+    },
+    {
+      name: 'analyze_progression',
+      description: 'Full harmonic analysis of a chord progression: Roman numerals, function, key detection, borrowed chords, cadences, reharmonization suggestions.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          progression: { type: 'string', description: 'Chord progression (e.g., "Am F C G" or "ii-V-I in Bb")' },
+          key: { type: 'string', description: 'Key (optional — will be detected if omitted)' }
+        },
+        required: ['progression']
+      }
+    },
+    {
+      name: 'suggest_scale',
+      description: 'Suggest scales that work over a chord, progression, or musical context. Explains WHY each scale works.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          context: { type: 'string', description: 'Chord, progression, or musical context' },
+          style: { type: 'string', description: 'Style preference: rock, jazz, blues, classical, fusion' }
+        },
+        required: ['context']
+      }
+    },
+    {
+      name: 'reharmonize',
+      description: 'Reharmonize a chord progression using substitution techniques: tritone sub, diatonic sub, modal interchange, chromatic approach, jazz voicings.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          progression: { type: 'string', description: 'Original chord progression' },
+          style: { type: 'string', description: 'Target style: jazz, bossa, neo-soul, classical, modal' },
+          complexity: { type: 'string', enum: ['simple', 'moderate', 'advanced'], description: 'How far to push the reharmonization' }
+        },
+        required: ['progression']
+      }
+    },
+    {
+      name: 'parse_tablature',
+      description: 'Parse guitar tablature, identify patterns (arpeggios, scales, riffs), name the chords, analyze the technique.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          tab: { type: 'string', description: 'Guitar tablature (ASCII format)' }
+        },
+        required: ['tab']
+      }
+    },
+    {
+      name: 'optic_analysis',
+      description: 'OPTIC/K voice-leading analysis between two chords or across a progression. O=octave displacement, P=permutation, T=transposition, I=inversion, C=cardinality change, K=K-net.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          chord_a: { type: 'string', description: 'First chord (e.g., Cmaj7)' },
+          chord_b: { type: 'string', description: 'Second chord (e.g., Fmaj7)' },
+          progression: { type: 'string', description: 'Full progression for analysis (alternative to chord_a/chord_b)' }
+        }
+      }
+    },
+    {
+      name: 'practice_routine',
+      description: 'Generate a structured practice routine based on skill level, focus area, and available time.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          level: { type: 'string', enum: ['beginner', 'intermediate', 'advanced'], description: 'Player level' },
+          focus: { type: 'string', description: 'What to work on: technique, theory, improvisation, repertoire, ear training' },
+          minutes: { type: 'number', description: 'Available practice time in minutes' }
+        },
+        required: ['level', 'focus', 'minutes']
+      }
+    },
+    {
+      name: 'fretboard_diagram',
+      description: 'Generate an ASCII fretboard diagram showing a scale, chord, or arpeggio with root/interval markers.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          type: { type: 'string', enum: ['scale', 'chord', 'arpeggio'], description: 'What to show' },
+          name: { type: 'string', description: 'Scale/chord/arpeggio name (e.g., "A minor pentatonic", "Cmaj7")' },
+          position: { type: 'string', description: 'Fretboard position or CAGED shape (optional)' }
+        },
+        required: ['type', 'name']
+      }
+    }
+  ];
+}
+
+module.exports = { buildDemerzelSystemPrompt, buildSeldonSystemPrompt, buildGASystemPrompt, getMusicTools };
