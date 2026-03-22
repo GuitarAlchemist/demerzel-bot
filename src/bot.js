@@ -1,7 +1,7 @@
 require('dotenv').config();
 const { Client, GatewayIntentBits, Partials, EmbedBuilder } = require('discord.js');
 const Anthropic = require('@anthropic-ai/sdk').default;
-const { buildDemerzelSystemPrompt, buildSeldonSystemPrompt, buildGASystemPrompt, getMusicTools } = require('./context');
+const { buildDemerzelSystemPrompt, buildSeldonSystemPrompt, buildGASystemPrompt, buildBSPrompt, getMusicTools } = require('./context');
 const { renderFretboard, renderNotation } = require('./vexRenderer');
 
 const client = new Client({
@@ -21,7 +21,7 @@ const conversationHistory = new Map();
 const MAX_HISTORY = 10;
 
 // Build system prompts once at startup
-let demerzelPrompt, seldonPrompt, gaPrompt, musicTools;
+let demerzelPrompt, seldonPrompt, gaPrompt, bsPrompt, musicTools;
 
 function getHistory(channelId) {
   if (!conversationHistory.has(channelId)) {
@@ -60,6 +60,14 @@ function detectPersona(message) {
     return 'seldon';
   }
 
+  // BS detector channel or keywords
+  if (channelName.includes('bs-detector') || channelName.includes('bs') ||
+      content.includes('translate this bs') || content.includes('detect bs') ||
+      content.includes('generate bs') || content.includes('corporate speak') ||
+      content.includes('buzzword')) {
+    return 'bs';
+  }
+
   // Music/guitar questions → GA musician persona
   if (content.includes('guitar') || content.includes('chord') || content.includes('scale') ||
       content.includes('tab') || content.includes('fretboard') || content.includes('improvise') ||
@@ -83,6 +91,7 @@ async function generateResponse(persona, channelId, userMessage) {
   let systemPrompt;
   if (persona === 'seldon') systemPrompt = seldonPrompt;
   else if (persona === 'ga') systemPrompt = gaPrompt;
+  else if (persona === 'bs') systemPrompt = bsPrompt;
   else systemPrompt = demerzelPrompt;
 
   const history = getHistory(channelId);
@@ -203,8 +212,9 @@ client.on('ready', () => {
   demerzelPrompt = buildDemerzelSystemPrompt();
   seldonPrompt = buildSeldonSystemPrompt();
   gaPrompt = buildGASystemPrompt();
+  bsPrompt = buildBSPrompt();
   musicTools = getMusicTools();
-  console.log('✓ Demerzel, Seldon, and GA prompts loaded');
+  console.log('✓ Demerzel, Seldon, GA, and BS Detector prompts loaded');
   console.log(`✓ ${musicTools.length} music tools registered`);
 
   client.user.setActivity('🎸 Ask me about guitar', { type: 3 }); // WATCHING
@@ -244,9 +254,11 @@ client.on('messageCreate', async (message) => {
   for (let i = 0; i < chunks.length; i++) {
     const embed = new EmbedBuilder()
       .setDescription(chunks[i])
-      .setColor(persona === 'ga' ? 0xF0883E : persona === 'seldon' ? 0x7289DA : 0x4CB050)
+      .setColor(persona === 'bs' ? 0xE06C75 : persona === 'ga' ? 0xF0883E : persona === 'seldon' ? 0x7289DA : 0x4CB050)
       .setFooter({
-        text: persona === 'ga'
+        text: persona === 'bs'
+          ? '🔴 BS Detector • gov-bs-generators.ebnf'
+          : persona === 'ga'
           ? '🎸 Guitar Alchemist'
           : persona === 'seldon'
           ? 'Seldon • Streeling University'
