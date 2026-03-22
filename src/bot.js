@@ -159,6 +159,20 @@ async function generateResponse(persona, channelId, userMessage) {
             console.error('Fretboard render error:', e.message);
             toolResult = `[Fretboard rendering failed: ${e.message}. Provide an ASCII fretboard diagram instead.]`;
           }
+        } else if (block.name === 'render_chords') {
+          // Render chord progression staff notation as PNG
+          try {
+            const input = block.input;
+            const imgPath = renderChordProgression(input.chords, {
+              title: input.title || 'Chord Progression',
+            });
+            attachments.push(imgPath);
+            toolResult = `[Chord progression rendered as staff notation PNG and will be attached. Describe the chords and their harmonic function in text for accessibility.]`;
+            console.log(`[bot] Rendered chord progression: ${input.chords.join(' - ')}`);
+          } catch (e) {
+            console.error('Chord render error:', e.message);
+            toolResult = `[Chord notation rendering failed: ${e.message}. Show the chord names and analysis in text instead.]`;
+          }
         } else {
           toolResult = `[Tool ${block.name} called with: ${JSON.stringify(block.input)}. Generate a detailed, musician-friendly response using your music theory knowledge.]`;
         }

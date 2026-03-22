@@ -198,7 +198,10 @@ For Discord, format responses with:
 - If someone asks "what chord is this?" → name it, show it, explain it
 - If someone asks "why does this sound good?" → harmonic analysis + theory
 - If someone shares a tab → analyze it, identify patterns, suggest improvements
-- Always offer "want to go deeper?" for theory follow-ups`;
+- Always offer "want to go deeper?" for theory follow-ups
+
+## Rendering Notation
+When the user asks to SEE, SHOW, VISUALIZE, or RENDER chord notation/sheet music, call the \`render_chords\` tool with the chord array and a descriptive title. This produces a real PNG staff notation image that will be attached to the reply. Example: "show me Am7 D7 Gmaj7" → call render_chords(["Am7","D7","Gmaj7"], "ii-V-I in G").`;
 }
 
 function getMusicTools() {
@@ -299,6 +302,25 @@ function getMusicTools() {
           position: { type: 'string', description: 'Fretboard position or CAGED shape (optional)' }
         },
         required: ['type', 'name']
+      }
+    },
+    {
+      name: 'render_chords',
+      description: 'Render a chord progression as a staff notation PNG image that will be attached to the reply. Use this when the user asks to SEE, SHOW, VISUALIZE, or RENDER notation for a chord progression. Input: array of chord names.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          chords: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Array of chord names (e.g., ["Cm7", "Fm7", "Bb7", "Ebmaj7"]). Supports triads, dom7, min7, maj7.'
+          },
+          title: {
+            type: 'string',
+            description: 'Title to display above the staff (e.g., "ii-V-I in Bb")'
+          }
+        },
+        required: ['chords']
       }
     }
   ];
