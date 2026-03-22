@@ -2,6 +2,7 @@ require('dotenv').config();
 const { Client, GatewayIntentBits, Partials, EmbedBuilder } = require('discord.js');
 const Anthropic = require('@anthropic-ai/sdk').default;
 const { buildDemerzelSystemPrompt, buildSeldonSystemPrompt, buildGASystemPrompt, getMusicTools } = require('./context');
+const { renderFretboard, renderNotation } = require('./vexRenderer');
 
 const client = new Client({
   intents: [
@@ -105,19 +106,37 @@ async function generateResponse(persona, channelId, userMessage) {
 
     let response = await anthropic.messages.create(apiParams);
 
-    // Handle tool_use responses — Claude calls a tool, we let it self-answer
-    // (In Phase 1, tools are advisory — Claude generates the answer using the tool structure)
+    // Handle tool_use responses
     let reply = '';
+    const attachments = []; // file paths to attach as images
+
     for (const block of response.content) {
       if (block.type === 'text') {
         reply += block.text;
       } else if (block.type === 'tool_use') {
-        // Log tool call for debugging
         console.log(`🎸 Tool call: ${block.name}(${JSON.stringify(block.input)})`);
 
-        // In Phase 1, we return a structured prompt back to Claude
-        // In Phase 2, this would call the actual ga MCP server
-        const toolResult = `[Tool ${block.name} called with: ${JSON.stringify(block.input)}. Generate a detailed, musician-friendly response using your music theory knowledge.]`;
+        let toolResult = '';
+
+        // Handle fretboard_diagram tool — render actual image
+        if (block.name === 'fretboard_diagram') {
+          try {
+            const input = block.input;
+            const imgPath = renderFretboard({
+              title: `${input.name} ${input.position ? '(' + input.position + ')' : ''}`.trim(),
+              notes: buildFretboardNotes(input.name, input.type),
+              startFret: 0,
+              endFret: 15,
+            });
+            attachments.push(imgPath);
+            toolResult = `[Fretboard diagram rendered as PNG image and will be attached. Describe the scale/chord positions in text too for accessibility.]`;
+          } catch (e) {
+            console.error('Fretboard render error:', e.message);
+            toolResult = `[Fretboard rendering failed: ${e.message}. Provide an ASCII fretboard diagram instead.]`;
+          }
+        } else {
+          toolResult = `[Tool ${block.name} called with: ${JSON.stringify(block.input)}. Generate a detailed, musician-friendly response using your music theory knowledge.]`;
+        }
 
         // Continue the conversation with tool result
         const followUp = await anthropic.messages.create({
@@ -142,7 +161,7 @@ async function generateResponse(persona, channelId, userMessage) {
 
     addToHistory(channelId, 'user', userMessage);
     addToHistory(channelId, 'assistant', reply);
-    return reply;
+    return { text: reply, attachments };
   } catch (error) {
     console.error('Claude API error:', error.message);
     if (error.message.includes('api_key')) {
@@ -209,14 +228,22 @@ client.on('messageCreate', async (message) => {
   // Show typing indicator
   await message.channel.sendTyping();
 
-  const reply = await generateResponse(persona, message.channel.id, content);
+  const result = await generateResponse(persona, message.channel.id, content);
+  const reply = typeof result === 'string' ? result : result.text;
+  const replyAttachments = typeof result === 'object' ? (result.attachments || []) : [];
 
   // Split long messages (Discord 2000 char limit)
   const chunks = splitMessage(reply, 1900);
 
-  for (const chunk of chunks) {
+  // Collect attachment files from tool rendering
+  const files = replyAttachments.map((filePath, i) => ({
+    attachment: filePath,
+    name: `diagram-${i + 1}.png`,
+  }));
+
+  for (let i = 0; i < chunks.length; i++) {
     const embed = new EmbedBuilder()
-      .setDescription(chunk)
+      .setDescription(chunks[i])
       .setColor(persona === 'ga' ? 0xF0883E : persona === 'seldon' ? 0x7289DA : 0x4CB050)
       .setFooter({
         text: persona === 'ga'
@@ -226,7 +253,14 @@ client.on('messageCreate', async (message) => {
           : 'Demerzel • Autonomous Governance',
       });
 
-    await message.reply({ embeds: [embed] });
+    const replyOptions = { embeds: [embed] };
+
+    // Attach images on the last chunk
+    if (i === chunks.length - 1 && files.length > 0) {
+      replyOptions.files = files;
+    }
+
+    await message.reply(replyOptions);
   }
 });
 
@@ -256,6 +290,38 @@ function splitMessage(text, maxLength) {
   }
 
   return chunks;
+}
+
+// Build fretboard note positions for common scales/chords
+function buildFretboardNotes(name, type) {
+  const n = (name || '').toLowerCase();
+  const notes = {};
+
+  // A minor pentatonic (most common request)
+  if (n.includes('minor pentatonic') || n.includes('am pentatonic') || n.includes('a minor pent')) {
+    const root = '#e06c75';   // red
+    const note = '#58a6ff';   // blue
+    // String 6 (low E): A(5), C(8), D(10)
+    notes[6] = [{ fret: 5, label: 'R', color: root }, { fret: 8, label: 'b3', color: note }, { fret: 10, label: '4', color: note }];
+    notes[5] = [{ fret: 5, label: '4', color: note }, { fret: 7, label: '5', color: note }, { fret: 10, label: 'b7', color: note }];
+    notes[4] = [{ fret: 5, label: 'b7', color: note }, { fret: 7, label: 'R', color: root }, { fret: 10, label: 'b3', color: note }];
+    notes[3] = [{ fret: 5, label: 'b3', color: note }, { fret: 7, label: '4', color: note }, { fret: 9, label: '5', color: note }];
+    notes[2] = [{ fret: 5, label: '5', color: note }, { fret: 8, label: 'b7', color: note }, { fret: 10, label: 'R', color: root }];
+    notes[1] = [{ fret: 5, label: 'R', color: root }, { fret: 8, label: 'b3', color: note }, { fret: 10, label: '4', color: note }];
+  }
+  // E minor pentatonic
+  else if (n.includes('e minor pent') || n.includes('em pentatonic')) {
+    const root = '#e06c75';
+    const note = '#58a6ff';
+    notes[6] = [{ fret: 0, label: 'R', color: root }, { fret: 3, label: 'b3', color: note }, { fret: 5, label: '4', color: note }];
+    notes[5] = [{ fret: 0, label: '4', color: note }, { fret: 2, label: '5', color: note }, { fret: 5, label: 'b7', color: note }];
+    notes[4] = [{ fret: 0, label: 'b7', color: note }, { fret: 2, label: 'R', color: root }, { fret: 5, label: 'b3', color: note }];
+    notes[3] = [{ fret: 0, label: 'b3', color: note }, { fret: 2, label: '4', color: note }, { fret: 4, label: '5', color: note }];
+    notes[2] = [{ fret: 0, label: '5', color: note }, { fret: 3, label: 'b7', color: note }, { fret: 5, label: 'R', color: root }];
+    notes[1] = [{ fret: 0, label: 'R', color: root }, { fret: 3, label: 'b3', color: note }, { fret: 5, label: '4', color: note }];
+  }
+  // Default: return empty (Claude will use ASCII)
+  return notes;
 }
 
 // Graceful shutdown
