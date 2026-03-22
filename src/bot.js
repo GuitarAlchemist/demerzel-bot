@@ -1,5 +1,21 @@
 require('dotenv').config();
 const { Client, GatewayIntentBits, Partials, EmbedBuilder } = require('discord.js');
+const fs = require('fs');
+const path = require('path');
+
+// Prevent duplicate instances
+const LOCK_FILE = path.join(__dirname, '.bot.lock');
+if (fs.existsSync(LOCK_FILE)) {
+  const pid = fs.readFileSync(LOCK_FILE, 'utf-8').trim();
+  try {
+    process.kill(parseInt(pid), 0); // Check if process exists
+    console.error(`Bot already running (PID ${pid}). Exiting.`);
+    process.exit(1);
+  } catch {
+    // Process doesn't exist, stale lock file
+  }
+}
+fs.writeFileSync(LOCK_FILE, String(process.pid));
 const Anthropic = require('@anthropic-ai/sdk').default;
 const { buildDemerzelSystemPrompt, buildSeldonSystemPrompt, buildGASystemPrompt, buildBSPrompt, getMusicTools } = require('./context');
 const { renderFretboard, renderNotation } = require('./vexRenderer');
@@ -336,11 +352,14 @@ function buildFretboardNotes(name, type) {
   return notes;
 }
 
-// Graceful shutdown
-process.on('SIGINT', () => {
-  console.log('\nShutting down...');
+// Graceful shutdown + lock cleanup
+function cleanup() {
+  try { fs.unlinkSync(LOCK_FILE); } catch {}
   client.destroy();
   process.exit(0);
-});
+}
+process.on('SIGINT', cleanup);
+process.on('SIGTERM', cleanup);
+process.on('exit', () => { try { fs.unlinkSync(LOCK_FILE); } catch {} });
 
 client.login(process.env.DISCORD_BOT_TOKEN);
