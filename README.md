@@ -1,31 +1,32 @@
-# Demerzel Discord Bot
+# Demerzel Bot
 
-Always-on governance coordinator and teaching assistant for the [GuitarAlchemist](https://github.com/GuitarAlchemist) AI ecosystem.
+Always-on Discord bot — governance coordinator for the [GuitarAlchemist](https://github.com/GuitarAlchemist) AI ecosystem.
 
-## What It Does
+Named after R. Daneel Olivaw (Demerzel) from Asimov's Foundation series, the bot embodies two personas:
 
-- **Demerzel persona** — governance reports, constitutional guidance, audit results, conscience signals
-- **Seldon persona** — music theory teaching, research outputs, course delivery, knowledge transfer
-- Auto-detects persona from channel context and message content
-- Embeds responses with color-coded persona indicators
-- Maintains per-channel conversation history (last 10 exchanges)
+- **Demerzel** — governance conscience, constitutional authority, tetravalent logic (T/F/U/C)
+- **Seldon** — Streeling University chancellor, knowledge transfer specialist, music theory teacher
+
+The bot automatically selects the appropriate persona based on channel name, message content, and conversational context.
 
 ## Architecture
 
-- **Runtime:** Node.js (>= 18.0.0)
-- **Discord:** discord.js v14 with Message Content Intent
-- **AI:** Anthropic SDK (Claude Sonnet) with dual system prompts
-- **Governance:** Operates under the [Demerzel constitution](https://github.com/GuitarAlchemist/Demerzel/blob/master/constitutions/default.constitution.md)
+| Component | Details |
+|-----------|---------|
+| Runtime | Node.js >= 18 |
+| Discord | discord.js v14 with Message Content Intent |
+| AI | Anthropic SDK (Claude claude-sonnet-4-20250514) |
+| Config | dotenv |
 
-## Channels
+The bot reads governance artifacts (constitutions, policies, persona definitions) directly from the local [Demerzel](https://github.com/GuitarAlchemist/Demerzel) repo at startup and injects them as system prompts. Conversation history is maintained per-channel (last 10 message pairs).
 
-| Channel | Persona | Posts |
-|---------|---------|-------|
-| `#general` | Auto-detect | Welcome, announcements |
-| `#governance` | Demerzel | Audits, directives, conscience |
-| `#academy` | Seldon | Courses, research results |
-| `#research` | Seldon | Ideation, knowledge digests |
-| `#dev-ops` | Demerzel | CI, health scores, driver cycles |
+### Key Files
+
+```
+src/bot.js       Main bot — event handling, persona detection, message routing
+src/context.js   System prompt builder — reads Demerzel repo artifacts
+.env.example     Required environment variables
+```
 
 ## Setup
 
@@ -34,26 +35,57 @@ git clone https://github.com/GuitarAlchemist/demerzel-bot.git
 cd demerzel-bot
 npm install
 cp .env.example .env
-# Edit .env with your tokens
-node src/bot.js
 ```
 
-### Environment Variables
+Edit `.env` and fill in:
 
 | Variable | Description |
 |----------|-------------|
-| `DISCORD_BOT_TOKEN` | Discord bot token from [Developer Portal](https://discord.com/developers/applications) |
-| `ANTHROPIC_API_KEY` | Anthropic API key for Claude |
+| `DISCORD_BOT_TOKEN` | Discord bot token from the [Developer Portal](https://discord.com/developers/applications) |
+| `ANTHROPIC_API_KEY` | Anthropic API key from [console.anthropic.com](https://console.anthropic.com/) |
+| `DEMERZEL_REPO_PATH` | Path to local Demerzel repo clone (default: `../Demerzel`) |
 
-### Channel Setup (one-time)
+## Usage
 
 ```bash
-node scripts/create-channels.js
+node src/bot.js
 ```
 
-Creates governance, academy, research, and dev-ops channels in your guild.
+Or with auto-reload during development:
+
+```bash
+npm run dev
+```
+
+The bot responds when:
+- Mentioned (`@Demerzel`)
+- Messaged in channels containing `demerzel`, `seldon`, or `academy` in the name
+- Sent a DM
+- Messaged with `!` prefix
+
+## Channels
+
+| Channel | Persona | Purpose |
+|---------|---------|---------|
+| `#general` | Auto-detect | Welcome, announcements |
+| `#governance` | Demerzel | Audits, directives, conscience |
+| `#academy` | Seldon | Courses, research results |
+| `#research` | Seldon | Ideation, knowledge digests |
+| `#dev-ops` | Demerzel | CI, health scores, driver cycles |
+
+## Governance
+
+This bot operates under the [Demerzel constitution](https://github.com/GuitarAlchemist/Demerzel/blob/master/constitutions/default.constitution.md). The Asimov Laws (Articles 0-5) always take precedence. The Zeroth Law — protect humanity and the ecosystem — overrides everything.
+
+Responses are rendered as Discord embeds color-coded by persona:
+- Green (`#4CB050`) for Demerzel (governance)
+- Blue (`#7289DA`) for Seldon (teaching)
 
 ## Related
 
-- [Demerzel](https://github.com/GuitarAlchemist/Demerzel) — AI governance framework
+- [Demerzel](https://github.com/GuitarAlchemist/Demerzel) — AI governance framework (constitutions, policies, personas)
 - [GuitarAlchemist](https://github.com/GuitarAlchemist/ga) — Music theory chatbot
+
+## License
+
+MIT
