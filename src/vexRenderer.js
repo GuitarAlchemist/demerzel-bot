@@ -5,6 +5,32 @@ const path = require('path');
 const os = require('os');
 
 // ---------------------------------------------------------------------------
+// Suppress VexFlow's noisy-but-harmless Node.js warnings at module load time.
+// "Element: No context for txtCanvas" fires hundreds of times because VexFlow
+// tries to measure text via a browser canvas; we provide a measurement canvas
+// below.  "couldn't load font bravura" is a native Cairo stderr message when
+// Bravura/Academico are not installed — it is cosmetic only.
+// ---------------------------------------------------------------------------
+const _SUPPRESSED_WARNS = [
+  'Element: No context for txtCanvas',
+  "couldn't load font",
+  'falling back to',
+];
+const _origWarn = console.warn.bind(console);
+console.warn = (...args) => {
+  const msg = args.join(' ');
+  if (_SUPPRESSED_WARNS.some(s => msg.includes(s))) return;
+  _origWarn(...args);
+};
+// Native stderr (Canvas/Cairo font fallback message)
+const _origStderrWrite = process.stderr.write.bind(process.stderr);
+process.stderr.write = (chunk, ...rest) => {
+  const s = Buffer.isBuffer(chunk) ? chunk.toString() : String(chunk);
+  if (_SUPPRESSED_WARNS.some(w => s.includes(w))) return true;
+  return _origStderrWrite(chunk, ...rest);
+};
+
+// ---------------------------------------------------------------------------
 // Chord voicing lookup table — explicit, enharmonically correct, VexFlow-ready
 // ---------------------------------------------------------------------------
 const CHORD_VOICINGS = {
@@ -136,6 +162,13 @@ function renderChordProgression(chords, options = {}) {
   // VexFlow 5 + node-canvas: canvas.style is undefined, patch it so resize() works
   if (!canvas.style) {
     canvas.style = {};
+  }
+
+  // Provide a measurement canvas so VexFlow's Element.getTextMetrics() works
+  // without spamming "No context for txtCanvas" warnings.
+  if (!vf.Element.txtCanvas) {
+    const measureCanvas = createCanvas(300, 150);
+    vf.Element.setTextMeasurementCanvas(measureCanvas);
   }
 
   const ctx = canvas.getContext('2d');
