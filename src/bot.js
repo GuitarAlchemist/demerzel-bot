@@ -18,7 +18,7 @@ if (fs.existsSync(LOCK_FILE)) {
 fs.writeFileSync(LOCK_FILE, String(process.pid));
 const Anthropic = require('@anthropic-ai/sdk').default;
 const { buildDemerzelSystemPrompt, buildSeldonSystemPrompt, buildGASystemPrompt, buildBSPrompt, getMusicTools } = require('./context');
-const { renderFretboard, renderNotation } = require('./vexRenderer');
+const { renderFretboard, renderChordProgression, tryRenderFromText } = require('./vexRenderer');
 
 const client = new Client({
   intents: [
@@ -274,7 +274,20 @@ client.on('messageCreate', async (message) => {
 
   const result = await generateResponse(persona, message.channel.id, content);
   const reply = typeof result === 'string' ? result : result.text;
-  const replyAttachments = typeof result === 'object' ? (result.attachments || []) : [];
+  let replyAttachments = typeof result === 'object' ? (result.attachments || []) : [];
+
+  // Auto-render chord progressions from GA responses
+  if (persona === 'ga' && replyAttachments.length === 0) {
+    try {
+      const rendered = tryRenderFromText(reply);
+      if (rendered) {
+        replyAttachments.push(rendered);
+        console.log('🎼 Auto-rendered chord progression from response');
+      }
+    } catch (e) {
+      console.error('Auto-render error:', e.message);
+    }
+  }
 
   // Split long messages (Discord 2000 char limit)
   const chunks = splitMessage(reply, 1900);
