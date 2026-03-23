@@ -74,6 +74,16 @@ Creates a new Discord text channel in this server. When a user asks you to creat
 ### list_channels
 Lists all text channels in the server with their topics. Use when asked about available channels.
 
+### create_thread
+Creates a thread in the current channel for experiment isolation. Use for:
+- Governance experiments (hypothesis → test → results)
+- Spectral optimization runs with live score updates
+- Chaos engineering tests (inject → detect → report)
+- Seldon research cycles with dedicated findings
+- Any task that would spam the main channel
+
+Threads keep the main channel clean while preserving full experiment history.
+
 **IMPORTANT:** When a user asks you to create something, DO IT using your tools. Do not explain what you would do — take the action.`;
 }
 
@@ -411,6 +421,18 @@ function getGovernanceTools() {
       input_schema: {
         type: 'object',
         properties: {},
+      },
+    },
+    {
+      name: 'create_thread',
+      description: 'Create a thread in the current channel for experiment isolation. Use for governance experiments, optimization cycles, chaos engineering tests, or any task that benefits from isolated discussion.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'Thread name (e.g., "spectral-opt-run-042", "chaos-test-belief-decay")' },
+          reason: { type: 'string', description: 'Why this thread exists — logged for traceability' },
+        },
+        required: ['name'],
       },
     },
   ];

@@ -36,6 +36,9 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const conversationHistory = new Map();
 const MAX_HISTORY = 10;
 
+// Track threads created by the bot so we respond in them
+const createdThreadIds = new Set();
+
 // Build system prompts once at startup
 let demerzelPrompt, seldonPrompt, gaPrompt, bsPrompt, musicTools, governanceTools;
 
@@ -103,7 +106,7 @@ function detectPersona(message) {
   return 'demerzel';
 }
 
-async function generateResponse(persona, channelId, userMessage) {
+async function generateResponse(persona, channelId, userMessage, currentChannel) {
   let systemPrompt;
   if (persona === 'seldon') systemPrompt = seldonPrompt;
   else if (persona === 'ga') systemPrompt = gaPrompt;
@@ -195,6 +198,20 @@ async function generateResponse(persona, channelId, userMessage) {
           } catch (e) {
             toolResult = `Channel creation failed: ${e.message}. The bot may need Manage Channels permission in Discord server settings.`;
           }
+        } else if (block.name === 'create_thread') {
+          try {
+            const thread = await currentChannel.threads.create({
+              name: block.input.name,
+              reason: block.input.reason || 'Created by Demerzel for experiment isolation',
+            });
+            createdThreadIds.add(thread.id);
+            toolResult = `Thread "${thread.name}" created successfully (${thread.id}). It is now available in #${currentChannel.name}. You can direct users to it.`;
+            if (block.input.reason) {
+              await thread.send(`**Thread created:** ${block.input.reason}`);
+            }
+          } catch (e) {
+            toolResult = `Thread creation failed: ${e.message}. The bot may need Create Public Threads permission in Discord server settings.`;
+          }
         } else if (block.name === 'list_channels') {
           try {
             const guild = client.guilds.cache.first();
@@ -256,6 +273,9 @@ function shouldRespond(message) {
 
   // Always respond to DMs
   if (!message.guild) return true;
+
+  // Respond in threads created by the bot
+  if (message.channel.isThread() && createdThreadIds.has(message.channel.id)) return true;
 
   // Respond when mentioned
   if (message.mentions.has(client.user)) return true;
@@ -328,7 +348,7 @@ client.on('messageCreate', async (message) => {
   // Show typing indicator
   await message.channel.sendTyping();
 
-  const result = await generateResponse(persona, message.channel.id, content);
+  const result = await generateResponse(persona, message.channel.id, content, message.channel);
   const reply = typeof result === 'string' ? result : result.text;
   let replyAttachments = typeof result === 'object' ? (result.attachments || []) : [];
 
