@@ -18,6 +18,7 @@ if (fs.existsSync(LOCK_FILE)) {
 }
 fs.writeFileSync(LOCK_FILE, String(process.pid));
 const Anthropic = require('@anthropic-ai/sdk').default;
+const OpenAI = require('openai').default;
 const { buildDemerzelSystemPrompt, buildSeldonSystemPrompt, buildGASystemPrompt, buildBSPrompt, getMusicTools, getGovernanceTools } = require('./context');
 const { renderFretboard, renderChordProgression, tryRenderFromText } = require('./vexRenderer');
 
@@ -33,6 +34,9 @@ const client = new Client({
 });
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const openai = process.env.OPENAI_API_KEY
+  ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+  : null;
 
 // Conversation history per channel (last 10 messages for context)
 const conversationHistory = new Map();
@@ -166,7 +170,32 @@ async function generateResponse(persona, channelId, userMessage, currentChannel)
       }
 
       response = await anthropic.messages.create(apiParams);
-      console.log('✓ Fallback model succeeded');
+      console.log('✓ Anthropic fallback model succeeded');
+    } catch (anthropicFallbackError) {
+      // All Anthropic models failed — try OpenAI as cross-provider backup
+      const isCreditsError = [primaryError?.message, anthropicFallbackError?.message]
+        .some(m => m && (m.includes('credit') || m.includes('balance') || m.includes('quota') || m.includes('billing')));
+
+      if (openai && isCreditsError) {
+        console.log('⚠️ All Anthropic models failed (credits). Falling back to OpenAI gpt-4o...');
+        const openaiResponse = await openai.chat.completions.create({
+          model: 'gpt-4o',
+          max_tokens: 2048,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            ...history.map(m => ({ role: m.role, content: m.content })),
+            { role: 'user', content: userMessage },
+          ],
+        });
+        const openaiText = openaiResponse.choices?.[0]?.message?.content ?? '';
+        console.log('✓ OpenAI fallback succeeded');
+        addToHistory(channelId, 'user', userMessage);
+        addToHistory(channelId, 'assistant', openaiText);
+        return { text: `${openaiText}\n\n_[Powered by OpenAI — Anthropic credits depleted]_`, attachments: [] };
+      }
+      // Re-throw if not a credits issue or no OpenAI key
+      throw anthropicFallbackError;
+    }
     }
 
     // Handle tool_use responses
