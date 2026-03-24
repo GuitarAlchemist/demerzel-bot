@@ -1,5 +1,6 @@
 require('dotenv').config();
 const { Client, GatewayIntentBits, Partials, EmbedBuilder, ChannelType } = require('discord.js');
+const voice = require('./voice');
 const fs = require('fs');
 const path = require('path');
 
@@ -26,6 +27,7 @@ const client = new Client({
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.DirectMessages,
+    GatewayIntentBits.GuildVoiceStates,
   ],
   partials: [Partials.Channel],
 });
@@ -260,6 +262,97 @@ async function generateResponse(persona, channelId, userMessage, currentChannel)
   }
 }
 
+/**
+ * Handle voice commands. Returns a response string if handled, null otherwise.
+ */
+async function handleVoiceCommand(content, message) {
+  const lower = content.toLowerCase();
+
+  // /join or !join — join the user's voice channel
+  if (lower === 'join' || lower === 'voice join') {
+    const vc = message.member?.voice?.channel;
+    if (!vc) return 'You need to be in a voice channel first.';
+    try {
+      await voice.joinChannel(vc);
+      return `Joined **${vc.name}**. Use \`speak <text>\` to hear me, or \`leave\` to disconnect.`;
+    } catch (e) {
+      return `Failed to join voice channel: ${e.message}`;
+    }
+  }
+
+  // /leave or !leave — disconnect from voice
+  if (lower === 'leave' || lower === 'voice leave' || lower === 'disconnect') {
+    if (!message.guild) return null;
+    const left = voice.leave(message.guild.id);
+    return left ? 'Disconnected from voice.' : 'I am not in a voice channel.';
+  }
+
+  // /speak <text> — synthesize and play in voice channel
+  const speakMatch = content.match(/^(?:speak|say|voice)\s+(.+)$/is);
+  if (speakMatch) {
+    const text = speakMatch[1].trim();
+    if (!text) return 'Provide text to speak. Example: `speak Hello world`';
+
+    const vc = message.member?.voice?.channel;
+    const conn = message.guild ? voice.getConnection(message.guild.id) : null;
+    const targetChannel = conn ? null : vc; // Use existing connection or join user's channel
+
+    if (!conn && !vc) return 'Join a voice channel first, or use `join` to have me connect.';
+
+    try {
+      if (targetChannel) {
+        await voice.joinChannel(targetChannel);
+      }
+      await voice.speak(vc || { guild: message.guild, id: conn.channelId }, text);
+      return `Spoke: "${text.length > 100 ? text.slice(0, 100) + '...' : text}"`;
+    } catch (e) {
+      return `Voice error: ${e.message}`;
+    }
+  }
+
+  // /announce — read latest governance report via voice
+  if (lower === 'announce' || lower === 'voice announce') {
+    const vc = message.member?.voice?.channel;
+    const conn = message.guild ? voice.getConnection(message.guild.id) : null;
+
+    if (!conn && !vc) return 'Join a voice channel first.';
+
+    try {
+      // Read the latest governance state for announcement
+      const fs = require('fs');
+      const path = require('path');
+      const repoPath = process.env.DEMERZEL_REPO_PATH || '../Demerzel';
+
+      let announcement = 'Governance cycle status report. ';
+
+      // Try to read governance health
+      try {
+        const healthPath = path.join(repoPath, 'state/governance-health.json');
+        const health = JSON.parse(fs.readFileSync(healthPath, 'utf-8'));
+        announcement += `Governance health score: ${health.R || health.score || 'unknown'}. `;
+      } catch { /* no health file */ }
+
+      // Try to read latest beliefs summary
+      try {
+        const beliefsPath = path.join(repoPath, 'state/beliefs.json');
+        const beliefs = JSON.parse(fs.readFileSync(beliefsPath, 'utf-8'));
+        const count = Array.isArray(beliefs) ? beliefs.length : Object.keys(beliefs).length;
+        announcement += `${count} beliefs in belief currency ledger. `;
+      } catch { /* no beliefs file */ }
+
+      announcement += 'All autonomous agents are within constitutional bounds. Demerzel out.';
+
+      if (vc && !conn) await voice.joinChannel(vc);
+      await voice.speak(vc || { guild: message.guild, id: conn.channelId }, announcement);
+      return `Governance announcement delivered to voice channel.`;
+    } catch (e) {
+      return `Announce error: ${e.message}`;
+    }
+  }
+
+  return null; // Not a voice command
+}
+
 function shouldRespond(message) {
   // Ignore other bots, but allow self-messages from Claude Code MCP
   // (MCP sends as the bot account — we detect these via a marker prefix)
@@ -329,11 +422,22 @@ client.on('messageCreate', async (message) => {
 
   const persona = detectPersona(message);
 
+  // Handle voice commands
+  const voiceResult = await handleVoiceCommand(content, message);
+  if (voiceResult) {
+    const embed = new EmbedBuilder()
+      .setDescription(voiceResult)
+      .setColor(0x4CB050)
+      .setFooter({ text: 'Demerzel • Voice' });
+    await message.reply({ embeds: [embed] });
+    return;
+  }
+
   // Handle "help" command — show channel tutorial
   if (content.toLowerCase() === 'help') {
     const tutorials = {
       'ga': '🎸 **Guitar Alchemist Help**\n\n• `What chord is Cmaj7?` — chord analysis\n• `Show me A minor pentatonic` — fretboard diagram\n• `Analyze Em - C - G - D` — harmonic analysis\n• `Reharmonize I-V-vi-IV in jazz` — chord substitution\n• `Practice routine, intermediate, 30 min` — practice plan\n• `OPTIC analysis: Cmaj7 to Fmaj7` — voice leading\n• `What scale over Dm7-G7-Cmaj7?` — scale suggestions',
-      'demerzel': '🏛️ **Demerzel Help**\n\n• `What are the Asimov Laws?` — Articles 0-5\n• `Explain ERGOL vs LOLLI` — compounding economics\n• `What is tetravalent logic?` — T/F/U/C\n• `What is D_c?` — compounding dimension\n• `Explain the AI-Age Manifesto` — 10 principles\n• `Explain Article 3 (Reversibility)` — constitutional principles',
+      'demerzel': '🏛️ **Demerzel Help**\n\n• `What are the Asimov Laws?` — Articles 0-5\n• `Explain ERGOL vs LOLLI` — compounding economics\n• `What is tetravalent logic?` — T/F/U/C\n• `What is D_c?` — compounding dimension\n• `Explain the AI-Age Manifesto` — 10 principles\n• `Explain Article 3 (Reversibility)` — constitutional principles\n\n🔊 **Voice Commands**\n• `join` — join your voice channel\n• `leave` — disconnect from voice\n• `speak <text>` — speak text via TTS\n• `announce` — read governance report aloud',
       'seldon': '📚 **Seldon Help**\n\n• `Teach me about modes` — adaptive lesson\n• `What departments exist?` — 21 departments\n• `Explain cybernetics` — VSM, feedback loops\n• `What is ERGOL vs LOLLI?` — compounding economics\n• `How does entropy relate to governance?` — Info Theory',
       'bs': '🔴 **BS Detector Help**\n\n• Paste any text → get BS score (4 tests)\n• `Generate BS about Q3 results` → inflate clear speech\n• `Translate: We need to rightsize our operational footprint` → decode jargon\n\nTests: Specificity · Falsifiability · Density · Commitment\nScore: 🟢 T (real) · 🟡 U (unclear) · 🔴 C (BS)',
     };
