@@ -119,24 +119,55 @@ async function generateResponse(persona, channelId, userMessage, currentChannel)
   const useTools = persona === 'ga' || persona === 'demerzel';
 
   try {
-    const apiParams = {
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 2048,
-      system: systemPrompt,
-      messages: [
-        ...history,
-        { role: 'user', content: userMessage },
-      ],
-    };
+    // Try primary model first, then fallback
+    let modelName = 'claude-sonnet-4-20250514';
+    let response;
 
-    // Register tools based on persona
-    if (persona === 'ga') {
-      apiParams.tools = musicTools;
-    } else if (persona === 'demerzel') {
-      apiParams.tools = governanceTools;
+    try {
+      const apiParams = {
+        model: modelName,
+        max_tokens: 2048,
+        system: systemPrompt,
+        messages: [
+          ...history,
+          { role: 'user', content: userMessage },
+        ],
+      };
+
+      // Register tools based on persona
+      if (persona === 'ga') {
+        apiParams.tools = musicTools;
+      } else if (persona === 'demerzel') {
+        apiParams.tools = governanceTools;
+      }
+
+      response = await anthropic.messages.create(apiParams);
+    } catch (primaryError) {
+      // If primary model fails, try fallback
+      console.warn(`Primary model (${modelName}) failed:`, primaryError.message);
+      console.log('Attempting fallback to claude-3-5-sonnet-20241022...');
+
+      modelName = 'claude-3-5-sonnet-20241022';
+      const apiParams = {
+        model: modelName,
+        max_tokens: 2048,
+        system: systemPrompt,
+        messages: [
+          ...history,
+          { role: 'user', content: userMessage },
+        ],
+      };
+
+      // Register tools based on persona
+      if (persona === 'ga') {
+        apiParams.tools = musicTools;
+      } else if (persona === 'demerzel') {
+        apiParams.tools = governanceTools;
+      }
+
+      response = await anthropic.messages.create(apiParams);
+      console.log('✓ Fallback model succeeded');
     }
-
-    let response = await anthropic.messages.create(apiParams);
 
     // Handle tool_use responses
     let reply = '';
@@ -231,7 +262,7 @@ async function generateResponse(persona, channelId, userMessage, currentChannel)
 
         // Continue the conversation with tool result
         const followUp = await anthropic.messages.create({
-          model: 'claude-sonnet-4-20250514',
+          model: modelName,
           max_tokens: 2048,
           system: systemPrompt,
           messages: [
@@ -255,8 +286,13 @@ async function generateResponse(persona, channelId, userMessage, currentChannel)
     return { text: reply, attachments };
   } catch (error) {
     console.error('Claude API error:', error.message);
+    console.error('Full error:', JSON.stringify(error, null, 2));
+
     if (error.message.includes('api_key')) {
       return '⚠️ I need an Anthropic API key to respond. Please set `ANTHROPIC_API_KEY` in the `.env` file.';
+    }
+    if (error.message.includes('credit') || error.message.includes('quota') || error.message.includes('balance')) {
+      return `⚠️ API Quota Error: ${error.message}. The API key may have exhausted its usage limit. Check https://console.anthropic.com/account/limits for billing status.`;
     }
     return `⚠️ I encountered an error: ${error.message}`;
   }
