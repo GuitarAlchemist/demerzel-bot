@@ -127,75 +127,55 @@ async function generateResponse(persona, channelId, userMessage, currentChannel)
     let modelName = 'claude-sonnet-4-20250514';
     let response;
 
-    try {
-      const apiParams = {
-        model: modelName,
+    // Build API params (reused across attempts)
+    function buildApiParams(model) {
+      const params = {
+        model,
         max_tokens: 2048,
         system: systemPrompt,
-        messages: [
-          ...history,
-          { role: 'user', content: userMessage },
-        ],
+        messages: [...history, { role: 'user', content: userMessage }],
       };
-
-      // Register tools based on persona
-      if (persona === 'ga') {
-        apiParams.tools = musicTools;
-      } else if (persona === 'demerzel') {
-        apiParams.tools = governanceTools;
-      }
-
-      response = await anthropic.messages.create(apiParams);
-    } catch (primaryError) {
-      // If primary model fails, try fallback
-      console.warn(`Primary model (${modelName}) failed:`, primaryError.message);
-      console.log('Attempting fallback to claude-3-5-sonnet-20241022...');
-
-      modelName = 'claude-3-5-sonnet-20241022';
-      const apiParams = {
-        model: modelName,
-        max_tokens: 2048,
-        system: systemPrompt,
-        messages: [
-          ...history,
-          { role: 'user', content: userMessage },
-        ],
-      };
-
-      // Register tools based on persona
-      if (persona === 'ga') {
-        apiParams.tools = musicTools;
-      } else if (persona === 'demerzel') {
-        apiParams.tools = governanceTools;
-      }
-
-      response = await anthropic.messages.create(apiParams);
-      console.log('✓ Anthropic fallback model succeeded');
-    } catch (anthropicFallbackError) {
-      // All Anthropic models failed — try OpenAI as cross-provider backup
-      const isCreditsError = [primaryError?.message, anthropicFallbackError?.message]
-        .some(m => m && (m.includes('credit') || m.includes('balance') || m.includes('quota') || m.includes('billing')));
-
-      if (openai && isCreditsError) {
-        console.log('⚠️ All Anthropic models failed (credits). Falling back to OpenAI gpt-4o...');
-        const openaiResponse = await openai.chat.completions.create({
-          model: 'gpt-4o',
-          max_tokens: 2048,
-          messages: [
-            { role: 'system', content: systemPrompt },
-            ...history.map(m => ({ role: m.role, content: m.content })),
-            { role: 'user', content: userMessage },
-          ],
-        });
-        const openaiText = openaiResponse.choices?.[0]?.message?.content ?? '';
-        console.log('✓ OpenAI fallback succeeded');
-        addToHistory(channelId, 'user', userMessage);
-        addToHistory(channelId, 'assistant', openaiText);
-        return { text: `${openaiText}\n\n_[Powered by OpenAI — Anthropic credits depleted]_`, attachments: [] };
-      }
-      // Re-throw if not a credits issue or no OpenAI key
-      throw anthropicFallbackError;
+      if (persona === 'ga') params.tools = musicTools;
+      else if (persona === 'demerzel') params.tools = governanceTools;
+      return params;
     }
+
+    // Attempt 1: Primary Anthropic model
+    try {
+      response = await anthropic.messages.create(buildApiParams(modelName));
+    } catch (primaryError) {
+      console.warn(`Primary model (${modelName}) failed:`, primaryError.message);
+
+      // Attempt 2: Fallback Anthropic model
+      try {
+        modelName = 'claude-3-5-sonnet-20241022';
+        console.log(`Attempting Anthropic fallback: ${modelName}...`);
+        response = await anthropic.messages.create(buildApiParams(modelName));
+        console.log('✓ Anthropic fallback succeeded');
+      } catch (fallbackError) {
+        // Attempt 3: OpenAI GPT-4o (cross-provider backup)
+        const errMsg = `${primaryError.message} ${fallbackError.message}`;
+        const isCreditsError = /credit|balance|quota|billing/i.test(errMsg);
+
+        if (openai && isCreditsError) {
+          console.log('⚠️ All Anthropic models failed (credits). Falling back to OpenAI gpt-4o...');
+          const openaiResponse = await openai.chat.completions.create({
+            model: 'gpt-4o',
+            max_tokens: 2048,
+            messages: [
+              { role: 'system', content: systemPrompt },
+              ...history.map(m => ({ role: m.role, content: m.content })),
+              { role: 'user', content: userMessage },
+            ],
+          });
+          const openaiText = openaiResponse.choices?.[0]?.message?.content ?? '';
+          console.log('✓ OpenAI fallback succeeded');
+          addToHistory(channelId, 'user', userMessage);
+          addToHistory(channelId, 'assistant', openaiText);
+          return { text: `${openaiText}\n\n_[Powered by OpenAI — Anthropic credits depleted]_`, attachments: [] };
+        }
+        throw fallbackError;
+      }
     }
 
     // Handle tool_use responses
