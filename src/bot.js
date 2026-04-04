@@ -21,6 +21,8 @@ const Anthropic = require('@anthropic-ai/sdk').default;
 const OpenAI = require('openai').default;
 const { buildDemerzelSystemPrompt, buildSeldonSystemPrompt, buildGASystemPrompt, buildBSPrompt, getMusicTools, getGovernanceTools } = require('./context');
 const { renderFretboard, renderChordProgression, tryRenderFromText } = require('./vexRenderer');
+const { tryLocal } = require('./llm-router');
+const USE_LOCAL_FIRST = process.env.DEMERZEL_LOCAL_FIRST !== '0'; // default ON, opt-out with =0
 
 const client = new Client({
   intents: [
@@ -123,6 +125,32 @@ async function generateResponse(persona, channelId, userMessage, currentChannel)
   const useTools = persona === 'ga' || persona === 'demerzel';
 
   try {
+    // ── Attempt 0: local-first routing (zero-token, sub-second for most queries) ──
+    // Classifier in llm-router.js picks light/medium/heavy Ollama tier based on
+    // task complexity, and returns ROUTE_TO_CLOUD for tool calls / constitutional
+    // reasoning / unavailable local. See policies/multi-model-orchestration v1.1.0.
+    if (USE_LOCAL_FIRST) {
+      try {
+        const local = await tryLocal({
+          userMessage,
+          persona,
+          useTools,
+          historyLen: history.length,
+          systemPrompt,
+          history,
+        });
+        addToHistory(channelId, 'user', userMessage);
+        addToHistory(channelId, 'assistant', local.text);
+        const badge = `_[${local.model} · ${local.speedTokPerSec} tok/s · local]_`;
+        return { text: `${local.text}\n\n${badge}`, attachments: [] };
+      } catch (e) {
+        // ROUTE_TO_CLOUD (expected) or LOCAL_UNAVAILABLE — fall through to Claude
+        if (e.code !== 'ROUTE_TO_CLOUD' && e.code !== 'LOCAL_UNAVAILABLE') {
+          console.warn('[llm-router] unexpected error, falling back to Claude:', e.message);
+        }
+      }
+    }
+
     // Try primary model first, then fallback
     let modelName = 'claude-sonnet-4-20250514';
     let response;
