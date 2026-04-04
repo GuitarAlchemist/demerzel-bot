@@ -24,11 +24,13 @@ const OLLAMA_ENDPOINT = process.env.OLLAMA_ENDPOINT || 'http://localhost:11434';
 //   heavy   qwen3:14b     ~9GB VRAM   ~7 tok/s     multi-step reasoning, long context
 //
 // Timeouts include cold-load (first call loads model into VRAM, 5-30s).
-// Warm calls are much faster. Integration-tested 2026-04-04 — all 3 tiers pass.
+// p95Budget values are the latency ceiling for warm calls — if breached,
+// the router logs a breach event so we can spot thermal throttling,
+// VRAM spillover to CPU, or model-choice mismatches.
 const TIERS = {
-  light:  { model: 'gemma3:4b',    maxTokens: 512,  timeoutMs: 60000  },
-  medium: { model: 'mistral:7b',   maxTokens: 1024, timeoutMs: 60000  },
-  heavy:  { model: 'qwen3:14b',    maxTokens: 2048, timeoutMs: 120000 },
+  light:  { model: 'gemma3:4b',    maxTokens: 512,  timeoutMs: 60000,  p95Budget: 3000  },
+  medium: { model: 'mistral:7b',   maxTokens: 1024, timeoutMs: 60000,  p95Budget: 12000 },
+  heavy:  { model: 'qwen3:14b',    maxTokens: 2048, timeoutMs: 120000, p95Budget: 60000 },
 };
 
 // --- Task classifier ---
@@ -156,6 +158,7 @@ async function callOllama({ tier, systemPrompt, history, userMessage }) {
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), cfg.timeoutMs);
+  const wallStart = Date.now();
 
   try {
     const res = await fetch(`${OLLAMA_ENDPOINT}/api/chat`, {
@@ -172,18 +175,53 @@ async function callOllama({ tier, systemPrompt, history, userMessage }) {
 
     if (!res.ok) throw new Error(`Ollama ${res.status}: ${await res.text()}`);
     const data = await res.json();
-    return {
-      text: data.message?.content ?? '',
-      model: cfg.model,
-      tier,
-      tokens: data.eval_count ?? 0,
-      speedTokPerSec: data.eval_count && data.eval_duration
-        ? (data.eval_count / (data.eval_duration / 1e9)).toFixed(1)
-        : null,
-    };
+    const wallMs = Date.now() - wallStart;
+    const tokens = data.eval_count ?? 0;
+    const speed = tokens && data.eval_duration
+      ? (tokens / (data.eval_duration / 1e9)).toFixed(1)
+      : null;
+
+    // Budget tracking — breach means model/VRAM/thermal regression.
+    // Warm-call breach, not cold-load: skip if first call for this tier.
+    const budget = _budgetState[tier] ||= { calls: 0, breaches: 0, totalMs: 0, totalTokens: 0 };
+    budget.calls++;
+    budget.totalMs += wallMs;
+    budget.totalTokens += tokens;
+    const isWarmCall = budget.calls > 1;
+    if (isWarmCall && wallMs > cfg.p95Budget) {
+      budget.breaches++;
+      logDecision({
+        kind: 'budget-breach',
+        tier,
+        model: cfg.model,
+        wallMs,
+        p95Budget: cfg.p95Budget,
+        tokens,
+        speedTokPerSec: speed,
+      });
+    }
+
+    return { text: data.message?.content ?? '', model: cfg.model, tier, tokens, speedTokPerSec: speed, wallMs };
   } finally {
     clearTimeout(timer);
   }
+}
+
+const _budgetState = {};
+
+/** Export current budget snapshot — useful for dashboards + /health endpoints. */
+function getBudgetStats() {
+  const out = {};
+  for (const [tier, s] of Object.entries(_budgetState)) {
+    out[tier] = {
+      calls: s.calls,
+      breaches: s.breaches,
+      breachRate: s.calls > 0 ? +(s.breaches / s.calls).toFixed(3) : 0,
+      avgLatencyMs: s.calls > 0 ? Math.round(s.totalMs / s.calls) : 0,
+      avgTokens: s.calls > 0 ? Math.round(s.totalTokens / s.calls) : 0,
+    };
+  }
+  return out;
 }
 
 // --- Availability probe (cache hit per-tier for 60s) ---
@@ -250,4 +288,4 @@ async function tryLocal(ctx) {
   throw err;
 }
 
-module.exports = { tryLocal, classify, classifySync, callOllama, TIERS, isTierAvailable, warmupDomains };
+module.exports = { tryLocal, classify, classifySync, callOllama, TIERS, isTierAvailable, warmupDomains, getBudgetStats };
