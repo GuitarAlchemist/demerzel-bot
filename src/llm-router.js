@@ -12,6 +12,8 @@
 // Zero tokens are spent on tiers 1-3. Tier 4 is opt-in (requires useTools or
 // explicit classifier escalation).
 
+const { classifyDomain, warmup: warmupDomains } = require('./domain-classifier');
+
 const OLLAMA_ENDPOINT = process.env.OLLAMA_ENDPOINT || 'http://localhost:11434';
 
 // --- Model tier registry ---
@@ -39,47 +41,55 @@ const TIERS = {
  * calls, constitutional reasoning, or explicit depth goes to 'cloud'.
  * Everything else starts at the cheapest tier that can plausibly handle it.
  */
-function classify({ userMessage, persona, useTools, historyLen }) {
-  // 1. Tools → Claude. Local tool calling via Ollama is possible but
-  //    the schemas are Anthropic-specific — not converting them here.
+/**
+ * Synchronous classifier — used as fallback when embeddings are unavailable,
+ * and as the secondary selector AFTER the embedding classifier decides
+ * domain='general' (i.e. routes locally). This picks light/medium/heavy
+ * based on message length + reasoning signal.
+ */
+function classifyTierSync({ userMessage, persona, useTools, historyLen }) {
   if (useTools) return 'cloud';
-
-  // 2. Constitutional / governance reasoning keywords → Claude.
-  //    Broader list than initial cut: discovered gemma3:4b answers "Zeroth
-  //    Law" as thermodynamics, "Laws" as legal code. These terms have
-  //    SPECIFIC governance meanings that only Claude + the full system
-  //    prompt understand reliably. Err toward the smart model.
   const msg = (userMessage || '').toLowerCase();
-  const constitutionalSignal = [
-    'article', 'zeroth', 'constitution', 'amendment', 'precedent',
-    'supersede', 'override', 'contradiction', 'escalate', 'asimov',
-    'daneel', 'demerzel', 'seldon', 'foundation', 'robotics',
-    'law of', 'laws of', 'three laws', 'first law', 'second law', 'third law',
-    'ergol', 'lolli', 'mandate',
-  ].some(k => msg.includes(k));
-  if (constitutionalSignal) return 'cloud';
-
-  // 3. Long context or deep history → heavy local (still free).
-  //    Under ~500 tokens total the light model is plenty.
   const msgLen = (userMessage || '').length;
-  const longContext = msgLen > 2000 || historyLen > 10;
-  if (longContext) return 'heavy';
-
-  // 4. Logic/math keywords → medium (reasoning model).
+  if (msgLen > 2000 || historyLen > 10) return 'heavy';
   const reasoningSignal = [
     'why', 'because', 'imply', 'prove', 'derive', 'compute',
     'calculate', 'conclude', 'therefore', 'hexavalent', 'tetravalent',
   ].some(k => msg.includes(k));
   if (reasoningSignal) return 'medium';
-
-  // 5. Persona depth: demerzel/seldon lean more reasoning-heavy — BUT only
-  //    when the message is non-trivial. A bare "ok thanks" on demerzel
-  //    persona doesn't need the medium-tier model.
   if ((persona === 'demerzel' || persona === 'seldon') && msgLen > 80) return 'medium';
-
-  // 6. Default: fast path.
   return msgLen > 400 ? 'medium' : 'light';
 }
+
+/**
+ * Asynchronous classifier — uses embedding-based domain classification
+ * (src/domain-classifier.js). Routes cross-domain queries (governance,
+ * music) to cloud, and picks a local tier for general chat.
+ *
+ * Domain list lives in domain-classifier.js as anchor sentences — add a
+ * new domain = add 3-5 examples, no code changes here.
+ *
+ * Falls back to sync tiering if embeddings fail (ollama down, etc).
+ */
+async function classify(ctx) {
+  if (ctx.useTools) return 'cloud';
+  // Short-circuit long context BEFORE paying the embedding cost. A 2500-char
+  // message doesn't need a domain vote — it's going to heavy regardless.
+  const msgLen = (ctx.userMessage || '').length;
+  if (msgLen > 2000 || (ctx.historyLen ?? 0) > 10) return 'heavy';
+  try {
+    const d = await classifyDomain(ctx.userMessage || '');
+    if (d.route === 'cloud') return 'cloud';
+    // route === 'local' → pick tier by msg characteristics
+    return classifyTierSync(ctx);
+  } catch {
+    // embeddings unavailable — fall through to sync heuristic
+    return classifyTierSync(ctx);
+  }
+}
+
+// Kept for back-compat callers that expect a sync function
+function classifySync(ctx) { return classifyTierSync(ctx); }
 
 // --- Local call via Ollama ---
 
@@ -159,7 +169,7 @@ async function isTierAvailable(tier) {
  * then invoke the existing Claude path.
  */
 async function tryLocal(ctx) {
-  const tier = classify(ctx);
+  const tier = await classify(ctx);
   if (tier === 'cloud') {
     const err = new Error('classifier routed to cloud');
     err.code = 'ROUTE_TO_CLOUD';
@@ -189,4 +199,4 @@ async function tryLocal(ctx) {
   throw err;
 }
 
-module.exports = { tryLocal, classify, callOllama, TIERS, isTierAvailable };
+module.exports = { tryLocal, classify, classifySync, callOllama, TIERS, isTierAvailable, warmupDomains };

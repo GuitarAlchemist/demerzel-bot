@@ -6,7 +6,7 @@ const { tryLocal, classify, TIERS, isTierAvailable } = require('../src/llm-route
 
 const cases = [
   { label: 'simple ack',         userMessage: 'ok thanks',                                persona: 'ga',       useTools: false, historyLen: 0, expect: 'light' },
-  { label: 'parse classify',     userMessage: 'what kind of node is persona-001?',        persona: 'demerzel', useTools: false, historyLen: 0, expect: 'light' },
+  { label: 'parse classify',     userMessage: 'what kind of node is persona-001?',        persona: 'demerzel', useTools: false, historyLen: 0, expect: 'cloud' /* governance node → safer on Claude */ },
   { label: 'logic derivation',   userMessage: 'why does this clause imply the test?',     persona: 'demerzel', useTools: false, historyLen: 2, expect: 'medium' },
   { label: 'long history',       userMessage: 'continue the analysis',                    persona: 'demerzel', useTools: false, historyLen: 15, expect: 'heavy' },
   { label: 'constitutional',     userMessage: 'is article 3 overridden by the amendment?', persona: 'demerzel', useTools: false, historyLen: 0, expect: 'cloud' },
@@ -15,10 +15,10 @@ const cases = [
 ];
 
 async function main() {
-  console.log('\n=== classifier cases ===\n');
+  console.log('\n=== classifier cases (async, embedding-driven) ===\n');
   let passed = 0;
   for (const c of cases) {
-    const got = classify(c);
+    const got = await classify(c);
     const ok = got === c.expect;
     if (ok) passed++;
     console.log(`${ok ? 'PASS' : 'FAIL'}  ${c.label.padEnd(20)} → ${got} (expected ${c.expect})`);
