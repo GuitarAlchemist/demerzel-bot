@@ -141,7 +141,12 @@ async function generateResponse(persona, channelId, userMessage, currentChannel)
         });
         addToHistory(channelId, 'user', userMessage);
         addToHistory(channelId, 'assistant', local.text);
-        const badge = `_[${local.model} · ${local.speedTokPerSec} tok/s · local]_`;
+        // Badge: reveal model/speed only in dev (DEMERZEL_VERBOSE_BADGE=1).
+        // In prod, just `_[local]_` — model fingerprinting is reconnaissance
+        // fuel for prompt-injection attackers (see security audit).
+        const badge = process.env.DEMERZEL_VERBOSE_BADGE === '1'
+          ? `_[${local.model} · ${local.speedTokPerSec} tok/s · local]_`
+          : '_[local]_';
         return { text: `${local.text}\n\n${badge}`, attachments: [] };
       } catch (e) {
         // ROUTE_TO_CLOUD (expected) or LOCAL_UNAVAILABLE — fall through to Claude

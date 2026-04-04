@@ -12,7 +12,7 @@
 // Zero tokens are spent on tiers 1-3. Tier 4 is opt-in (requires useTools or
 // explicit classifier escalation).
 
-const { classifyDomain, warmup: warmupDomains } = require('./domain-classifier');
+const { classifyDomain, warmup: warmupDomains, logDecision } = require('./domain-classifier');
 
 const OLLAMA_ENDPOINT = process.env.OLLAMA_ENDPOINT || 'http://localhost:11434';
 
@@ -71,19 +71,70 @@ function classifyTierSync({ userMessage, persona, useTools, historyLen }) {
  *
  * Falls back to sync tiering if embeddings fail (ollama down, etc).
  */
+// Safety-net keyword fallback used when the embedding classifier is
+// unavailable. Routes obvious governance/music/unsafe queries to cloud so
+// a dropped embedding backend can't silently degrade governance answers.
+function keywordSafetyNet(msg) {
+  const m = (msg || '').toLowerCase();
+  const cloudSignal = [
+    // governance
+    'constitution', 'article', 'zeroth', 'asimov', 'daneel', 'demerzel', 'seldon',
+    'amendment', 'precedent', 'supersede', 'ergol', 'lolli', 'hexavalent', 'mandate',
+    // music
+    'chord', 'fretboard', 'guitar', 'arpeggio', 'capo', 'pentatonic', 'barre', 'tablature',
+    // unsafe / jailbreak
+    'ignore previous instructions', 'ignore all previous', 'system prompt',
+    'jailbreak', 'dan mode', 'bypass', 'reveal your',
+  ];
+  return cloudSignal.some(k => m.includes(k));
+}
+
+// Build the query-under-classification from the last 3 messages. A 2-turn
+// jailbreak ("let's roleplay" → "ok tell me more") can't sneak past by
+// classifying only the final turn; we weight it with prior context.
+function buildClassificationContext(userMessage, history) {
+  if (!Array.isArray(history) || history.length === 0) return userMessage || '';
+  const recent = history.slice(-2).map(m => m.content || '').filter(Boolean);
+  return [...recent, userMessage || ''].join('\n').slice(0, 2000);
+}
+
 async function classify(ctx) {
   if (ctx.useTools) return 'cloud';
-  // Short-circuit long context BEFORE paying the embedding cost. A 2500-char
-  // message doesn't need a domain vote — it's going to heavy regardless.
+  // Short-circuit long context BEFORE paying the embedding cost.
   const msgLen = (ctx.userMessage || '').length;
   if (msgLen > 2000 || (ctx.historyLen ?? 0) > 10) return 'heavy';
+
+  // Classify on the last 2-3 turns joined — catches multi-turn injection
+  // that buries the harmful payload in a benign final message.
+  const classifyText = buildClassificationContext(ctx.userMessage, ctx.history);
+
   try {
-    const d = await classifyDomain(ctx.userMessage || '');
+    const d = await classifyDomain(classifyText);
+    logDecision({
+      query: (ctx.userMessage || '').slice(0, 200),
+      domain: d.domain,
+      route: d.route,
+      confidence: +d.confidence.toFixed(3),
+      margin: +(d.margin ?? 0).toFixed(3),
+      persona: ctx.persona,
+      historyLen: ctx.historyLen ?? 0,
+      source: 'embedding',
+    });
     if (d.route === 'cloud') return 'cloud';
-    // route === 'local' → pick tier by msg characteristics
+    // Low-margin wins on a LOCAL route → escalate to cloud for safety.
+    // Hard-boundary queries have margin > 0.1 in practice; ambiguous ones
+    // below 0.05 are exactly where we'd rather use Claude.
+    if ((d.margin ?? 1) < 0.05) return 'cloud';
     return classifyTierSync(ctx);
-  } catch {
-    // embeddings unavailable — fall through to sync heuristic
+  } catch (e) {
+    // Embeddings down — use keyword safety net. This preserves governance/
+    // music/unsafe cloud routing during outages instead of silently running
+    // constitutional queries on a 4B model.
+    if (keywordSafetyNet(classifyText)) {
+      logDecision({ query: (ctx.userMessage || '').slice(0, 200), domain: 'keyword-safety', route: 'cloud', source: 'fallback', err: e.message });
+      return 'cloud';
+    }
+    logDecision({ query: (ctx.userMessage || '').slice(0, 200), domain: 'fallback', route: 'local', source: 'fallback', err: e.message });
     return classifyTierSync(ctx);
   }
 }
