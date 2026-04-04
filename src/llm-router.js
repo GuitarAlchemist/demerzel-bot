@@ -45,12 +45,17 @@ function classify({ userMessage, persona, useTools, historyLen }) {
   if (useTools) return 'cloud';
 
   // 2. Constitutional / governance reasoning keywords → Claude.
-  //    These touch Asimov laws, article interpretation, amendments — a wrong
-  //    answer here has governance cost. Err toward the smart model.
+  //    Broader list than initial cut: discovered gemma3:4b answers "Zeroth
+  //    Law" as thermodynamics, "Laws" as legal code. These terms have
+  //    SPECIFIC governance meanings that only Claude + the full system
+  //    prompt understand reliably. Err toward the smart model.
   const msg = (userMessage || '').toLowerCase();
   const constitutionalSignal = [
     'article', 'zeroth', 'constitution', 'amendment', 'precedent',
     'supersede', 'override', 'contradiction', 'escalate', 'asimov',
+    'daneel', 'demerzel', 'seldon', 'foundation', 'robotics',
+    'law of', 'laws of', 'three laws', 'first law', 'second law', 'third law',
+    'ergol', 'lolli', 'mandate',
   ].some(k => msg.includes(k));
   if (constitutionalSignal) return 'cloud';
 
@@ -67,9 +72,10 @@ function classify({ userMessage, persona, useTools, historyLen }) {
   ].some(k => msg.includes(k));
   if (reasoningSignal) return 'medium';
 
-  // 5. Persona depth: demerzel/seldon lean more reasoning-heavy than
-  //    the ga music chatbot persona.
-  if (persona === 'demerzel' || persona === 'seldon') return 'medium';
+  // 5. Persona depth: demerzel/seldon lean more reasoning-heavy — BUT only
+  //    when the message is non-trivial. A bare "ok thanks" on demerzel
+  //    persona doesn't need the medium-tier model.
+  if ((persona === 'demerzel' || persona === 'seldon') && msgLen > 80) return 'medium';
 
   // 6. Default: fast path.
   return msgLen > 400 ? 'medium' : 'light';
