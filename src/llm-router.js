@@ -16,10 +16,17 @@ const OLLAMA_ENDPOINT = process.env.OLLAMA_ENDPOINT || 'http://localhost:11434';
 
 // --- Model tier registry ---
 
+// Tier models — validated on RTX 5080 16GB with Chrome/WebGPU holding ~7GB:
+//   light   gemma3:4b     ~3GB VRAM   ~150 tok/s   schema lint / classify / ack
+//   medium  mistral:7b    ~4GB VRAM   ~11 tok/s    logic, policy checks, beliefs
+//   heavy   qwen3:14b     ~9GB VRAM   ~7 tok/s     multi-step reasoning, long context
+//
+// Timeouts include cold-load (first call loads model into VRAM, 5-30s).
+// Warm calls are much faster. Integration-tested 2026-04-04 — all 3 tiers pass.
 const TIERS = {
-  light:  { model: 'gemma3:4b',    maxTokens: 512,  timeoutMs: 4000  },
-  medium: { model: 'qwen3:14b',    maxTokens: 1024, timeoutMs: 8000  },
-  heavy:  { model: 'gpt-oss:20b',  maxTokens: 2048, timeoutMs: 15000 },
+  light:  { model: 'gemma3:4b',    maxTokens: 512,  timeoutMs: 60000  },
+  medium: { model: 'mistral:7b',   maxTokens: 1024, timeoutMs: 60000  },
+  heavy:  { model: 'qwen3:14b',    maxTokens: 2048, timeoutMs: 120000 },
 };
 
 // --- Task classifier ---
