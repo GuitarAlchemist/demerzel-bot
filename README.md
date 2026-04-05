@@ -81,6 +81,25 @@ Responses are rendered as Discord embeds color-coded by persona:
 - Green (`#4CB050`) for Demerzel (governance)
 - Blue (`#7289DA`) for Seldon (teaching)
 
+## Compatibility
+
+| Dependency | Required | Notes |
+|------------|----------|-------|
+| Node.js | >= 18 | Uses ES module features via CommonJS |
+| Demerzel repo | Current `master` | Must contain `constitutions/`, `policies/`, `grammars/` |
+| Claude model | `claude-sonnet-4-20250514` or later | Configured in `src/bot.js` |
+| Discord.js | v14 | Message Content Intent required |
+
+### Demerzel Path
+
+The bot reads governance artifacts from a local Demerzel repo clone. At startup, it validates the path exists and contains required constitution files. If validation fails, the bot exits with a clear error message.
+
+**Default path:** `../Demerzel` (sibling directory). Override with `DEMERZEL_REPO_PATH` env var.
+
+**Required artifacts:** `constitutions/default.constitution.md`, `constitutions/asimov.constitution.md`, `constitutions/demerzel-mandate.md`. If any are missing, the bot will not start.
+
+**Consumption level:** Loaded (not Enforced). The bot injects governance artifacts as system prompts but does not validate agent actions against constitutional articles at runtime. See the [Demerzel consumption map](https://github.com/GuitarAlchemist/Demerzel#governance-consumption-map) for details.
+
 ## Related
 
 - [Demerzel](https://github.com/GuitarAlchemist/Demerzel) — AI governance framework (constitutions, policies, personas)

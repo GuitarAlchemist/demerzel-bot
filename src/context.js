@@ -3,6 +3,33 @@ const path = require('path');
 
 const REPO_PATH = process.env.DEMERZEL_REPO_PATH || '../Demerzel';
 
+const REQUIRED_ARTIFACTS = [
+  'constitutions/default.constitution.md',
+  'constitutions/asimov.constitution.md',
+  'constitutions/demerzel-mandate.md',
+];
+
+function validateDemerzelPath() {
+  const resolved = path.resolve(REPO_PATH);
+  if (!fs.existsSync(resolved)) {
+    console.error(`[demerzel-bot] Demerzel repo not found at: ${resolved}`);
+    console.error(`  Set DEMERZEL_REPO_PATH or clone Demerzel as a sibling directory.`);
+    process.exit(1);
+  }
+  const missing = REQUIRED_ARTIFACTS.filter(
+    (a) => !fs.existsSync(path.join(resolved, a))
+  );
+  if (missing.length > 0) {
+    console.error(`[demerzel-bot] Demerzel repo found at ${resolved} but missing required artifacts:`);
+    missing.forEach((a) => console.error(`  - ${a}`));
+    console.error(`  Ensure the Demerzel repo is up to date (git pull).`);
+    process.exit(1);
+  }
+  console.log(`[demerzel-bot] Demerzel repo validated at: ${resolved}`);
+}
+
+validateDemerzelPath();
+
 function readFile(relativePath) {
   try {
     return fs.readFileSync(path.join(REPO_PATH, relativePath), 'utf-8');
