@@ -1,2 +1,6 @@
 node_modules/
 .env
+
+# Runtime artifacts (should not be tracked)
+src/.bot.lock
+logs/
