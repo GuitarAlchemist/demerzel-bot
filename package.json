@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node src/bot.js",
     "dev": "node --watch src/bot.js",
+    "test:context": "node --test scripts/test-context.js",
     "test:voice": "node scripts/test-voice-pipeline.js"
   },
   "keywords": [

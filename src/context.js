@@ -9,26 +9,37 @@ const REQUIRED_ARTIFACTS = [
   'constitutions/demerzel-mandate.md',
 ];
 
-function validateDemerzelPath() {
-  const resolved = path.resolve(REPO_PATH);
+function validateDemerzelPath(repoPath = REPO_PATH) {
+  const resolved = path.resolve(repoPath);
   if (!fs.existsSync(resolved)) {
-    console.error(`[demerzel-bot] Demerzel repo not found at: ${resolved}`);
-    console.error(`  Set DEMERZEL_REPO_PATH or clone Demerzel as a sibling directory.`);
-    process.exit(1);
+    return {
+      ok: false,
+      resolvedPath: resolved,
+      missingArtifacts: [],
+      message: `[demerzel-bot] Demerzel repo not found at: ${resolved}\n` +
+        '  Set DEMERZEL_REPO_PATH or clone Demerzel as a sibling directory.',
+    };
   }
   const missing = REQUIRED_ARTIFACTS.filter(
     (a) => !fs.existsSync(path.join(resolved, a))
   );
   if (missing.length > 0) {
-    console.error(`[demerzel-bot] Demerzel repo found at ${resolved} but missing required artifacts:`);
-    missing.forEach((a) => console.error(`  - ${a}`));
-    console.error(`  Ensure the Demerzel repo is up to date (git pull).`);
-    process.exit(1);
+    return {
+      ok: false,
+      resolvedPath: resolved,
+      missingArtifacts: missing,
+      message: `[demerzel-bot] Demerzel repo found at ${resolved} but missing required artifacts:\n` +
+        missing.map((a) => `  - ${a}`).join('\n') +
+        '\n  Ensure the Demerzel repo is up to date (git pull).',
+    };
   }
-  console.log(`[demerzel-bot] Demerzel repo validated at: ${resolved}`);
+  return {
+    ok: true,
+    resolvedPath: resolved,
+    missingArtifacts: [],
+    message: `[demerzel-bot] Demerzel repo validated at: ${resolved}`,
+  };
 }
-
-validateDemerzelPath();
 
 function readFile(relativePath) {
   try {
@@ -465,4 +476,13 @@ function getGovernanceTools() {
   ];
 }
 
-module.exports = { buildDemerzelSystemPrompt, buildSeldonSystemPrompt, buildGASystemPrompt, buildBSPrompt, getMusicTools, getGovernanceTools };
+module.exports = {
+  REQUIRED_ARTIFACTS,
+  validateDemerzelPath,
+  buildDemerzelSystemPrompt,
+  buildSeldonSystemPrompt,
+  buildGASystemPrompt,
+  buildBSPrompt,
+  getMusicTools,
+  getGovernanceTools,
+};
