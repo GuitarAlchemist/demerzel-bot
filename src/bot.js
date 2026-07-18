@@ -1,4 +1,21 @@
 require('dotenv').config();
+const {
+  validateDemerzelPath,
+  buildDemerzelSystemPrompt,
+  buildSeldonSystemPrompt,
+  buildGASystemPrompt,
+  buildBSPrompt,
+  getMusicTools,
+  getGovernanceTools,
+} = require('./context');
+
+const contextValidation = validateDemerzelPath();
+if (!contextValidation.ok) {
+  console.error(contextValidation.message);
+  process.exit(1);
+}
+console.log(contextValidation.message);
+
 const { Client, GatewayIntentBits, Partials, EmbedBuilder, ChannelType } = require('discord.js');
 const voice = require('./voice');
 const fs = require('fs');
@@ -19,7 +36,6 @@ if (fs.existsSync(LOCK_FILE)) {
 fs.writeFileSync(LOCK_FILE, String(process.pid));
 const Anthropic = require('@anthropic-ai/sdk').default;
 const OpenAI = require('openai').default;
-const { buildDemerzelSystemPrompt, buildSeldonSystemPrompt, buildGASystemPrompt, buildBSPrompt, getMusicTools, getGovernanceTools } = require('./context');
 const { renderFretboard, renderChordProgression, tryRenderFromText } = require('./vexRenderer');
 const { tryLocal } = require('./llm-router');
 const USE_LOCAL_FIRST = process.env.DEMERZEL_LOCAL_FIRST !== '0'; // default ON, opt-out with =0
